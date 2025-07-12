@@ -114,3 +114,10 @@ const LoginForm: React.FC = () => {
 };
 
 export default LoginForm;
+
+async function logout() {
+  // Simulate clearing authentication state (e.g., remove token from storage)
+  localStorage.removeItem('authToken');
+  // Add any other cleanup logic if needed
+  return Promise.resolve();
+}
