@@ -21,6 +21,7 @@ const LoginForm: React.FC = () => {
       navigate('/dashboard');
     } else {
       setError('Invalid email or password');
+    }
     logout().then(() => {
       navigate('/login');
     });
