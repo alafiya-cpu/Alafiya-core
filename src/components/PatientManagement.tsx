@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Patient } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
 import { Plus, Search, Edit2, Eye, Filter } from 'lucide-react';
 import { format } from 'date-fns';
 
+type Patient = Database['public']['Tables']['patients']['Row'];
+type PatientInsert = Database['public']['Tables']['patients']['Insert'];
+type PatientUpdate = Database['public']['Tables']['patients']['Update'];
+
 const PatientManagement: React.FC = () => {
-  const [patients, setPatients] = useLocalStorage<Patient[]>('patients', []);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -21,52 +26,84 @@ const PatientManagement: React.FC = () => {
     paymentStatus: 'pending' as 'paid' | 'pending' | 'overdue'
   });
 
+  // Fetch patients on component mount
+  React.useEffect(() => {
+    fetchPatients();
+  }, []);
+
+  const fetchPatients = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPatients(data || []);
+    } catch (error) {
+      console.error('Error fetching patients:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         patient.contactNumber.includes(searchTerm);
+                         patient.contact_number.includes(searchTerm);
     const matchesStatus = filterStatus === 'all' || 
-                         (filterStatus === 'active' && patient.isActive) ||
-                         (filterStatus === 'discharged' && !patient.isActive);
+                         (filterStatus === 'active' && patient.is_active) ||
+                         (filterStatus === 'discharged' && !patient.is_active);
     return matchesSearch && matchesStatus;
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const currentDate = new Date().toISOString();
+    setLoading(true);
     
-    if (editingPatient) {
-      setPatients(prev => prev.map(p => 
-        p.id === editingPatient.id 
-          ? {
-              ...p,
-              name: formData.name,
-              age: parseInt(formData.age),
-              contactNumber: formData.contactNumber,
-              diagnoses: formData.diagnoses,
-              treatment: formData.treatment,
-              paymentAmount: parseFloat(formData.paymentAmount),
-              paymentStatus: formData.paymentStatus
-            }
-          : p
-      ));
-    } else {
-      const newPatient: Patient = {
-        id: crypto.randomUUID(),
-        name: formData.name,
-        age: parseInt(formData.age),
-        contactNumber: formData.contactNumber,
-        registrationDate: currentDate,
-        diagnoses: formData.diagnoses,
-        treatment: formData.treatment,
-        lastPaymentDate: currentDate,
-        paymentAmount: parseFloat(formData.paymentAmount),
-        paymentStatus: formData.paymentStatus,
-        isActive: true
-      };
-      setPatients(prev => [...prev, newPatient]);
-    }
+    try {
+      if (editingPatient) {
+        const updateData: PatientUpdate = {
+          name: formData.name,
+          age: parseInt(formData.age),
+          contact_number: formData.contactNumber,
+          diagnoses: formData.diagnoses,
+          treatment: formData.treatment,
+          payment_amount: parseFloat(formData.paymentAmount),
+          payment_status: formData.paymentStatus
+        };
 
-    resetForm();
+        const { error } = await supabase
+          .from('patients')
+          .update(updateData)
+          .eq('id', editingPatient.id);
+
+        if (error) throw error;
+      } else {
+        const insertData: PatientInsert = {
+          name: formData.name,
+          age: parseInt(formData.age),
+          contact_number: formData.contactNumber,
+          diagnoses: formData.diagnoses,
+          treatment: formData.treatment,
+          payment_amount: parseFloat(formData.paymentAmount),
+          payment_status: formData.paymentStatus,
+          is_active: true
+        };
+
+        const { error } = await supabase
+          .from('patients')
+          .insert(insertData);
+
+        if (error) throw error;
+      }
+
+      await fetchPatients();
+      resetForm();
+    } catch (error) {
+      console.error('Error saving patient:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -87,15 +124,23 @@ const PatientManagement: React.FC = () => {
     setFormData({
       name: patient.name,
       age: patient.age.toString(),
-      contactNumber: patient.contactNumber,
+      contactNumber: patient.contact_number,
       diagnoses: patient.diagnoses,
       treatment: patient.treatment,
-      paymentAmount: patient.paymentAmount.toString(),
-      paymentStatus: patient.paymentStatus
+      paymentAmount: patient.payment_amount.toString(),
+      paymentStatus: patient.payment_status
     });
     setEditingPatient(patient);
     setShowForm(true);
   };
+
+  if (loading && patients.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -260,22 +305,22 @@ const PatientManagement: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-lg font-medium text-gray-900">{patient.name}</p>
-                        <p className="text-sm text-gray-500">Age: {patient.age} | Contact: {patient.contactNumber}</p>
+                        <p className="text-sm text-gray-500">Age: {patient.age} | Contact: {patient.contact_number}</p>
                       </div>
                       <div className="flex items-center space-x-2">
                         <span className={`px-2 py-1 text-xs rounded-full ${
-                          patient.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          patient.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                         }`}>
-                          {patient.isActive ? 'Active' : 'Discharged'}
+                          {patient.is_active ? 'Active' : 'Discharged'}
                         </span>
                         <span className={`px-2 py-1 text-xs rounded-full ${
-                          patient.paymentStatus === 'paid' 
+                          patient.payment_status === 'paid' 
                             ? 'bg-green-100 text-green-800'
-                            : patient.paymentStatus === 'pending'
+                            : patient.payment_status === 'pending'
                             ? 'bg-yellow-100 text-yellow-800'
                             : 'bg-red-100 text-red-800'
                         }`}>
-                          {patient.paymentStatus}
+                          {patient.payment_status}
                         </span>
                       </div>
                     </div>
@@ -287,8 +332,8 @@ const PatientManagement: React.FC = () => {
                         <strong>Treatment:</strong> {patient.treatment}
                       </p>
                       <p className="text-sm text-gray-500 mt-1">
-                        Registered: {format(new Date(patient.registrationDate), 'MMM dd, yyyy')} | 
-                        Last Payment: {format(new Date(patient.lastPaymentDate), 'MMM dd, yyyy')}
+                        Registered: {format(new Date(patient.registration_date), 'MMM dd, yyyy')} | 
+                        Last Payment: {format(new Date(patient.last_payment_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
                   </div>

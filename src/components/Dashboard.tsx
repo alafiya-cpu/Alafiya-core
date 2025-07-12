@@ -1,16 +1,47 @@
 import React from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Patient, Payment, Treatment } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
 import { Users, DollarSign, AlertTriangle, UserX, Calendar, TrendingUp } from 'lucide-react';
 import { format, isAfter, subDays, startOfMonth, endOfMonth } from 'date-fns';
 
-const Dashboard: React.FC = () => {
-  const [patients] = useLocalStorage<Patient[]>('patients', []);
-  const [payments] = useLocalStorage<Payment[]>('payments', []);
-  const [treatments] = useLocalStorage<Treatment[]>('treatments', []);
+type Patient = Database['public']['Tables']['patients']['Row'];
+type Payment = Database['public']['Tables']['payments']['Row'];
+type Treatment = Database['public']['Tables']['treatments']['Row'];
 
-  const activePatients = patients.filter(p => p.isActive);
-  const dischargedPatients = patients.filter(p => !p.isActive);
+const Dashboard: React.FC = () => {
+  const [patients, setPatients] = React.useState<Patient[]>([]);
+  const [payments, setPayments] = React.useState<Payment[]>([]);
+  const [treatments, setTreatments] = React.useState<Treatment[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [patientsResponse, paymentsResponse, treatmentsResponse] = await Promise.all([
+        supabase.from('patients').select('*'),
+        supabase.from('payments').select('*'),
+        supabase.from('treatments').select('*')
+      ]);
+
+      if (patientsResponse.error) throw patientsResponse.error;
+      if (paymentsResponse.error) throw paymentsResponse.error;
+      if (treatmentsResponse.error) throw treatmentsResponse.error;
+
+      setPatients(patientsResponse.data || []);
+      setPayments(paymentsResponse.data || []);
+      setTreatments(treatmentsResponse.data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const activePatients = patients.filter(p => p.is_active);
+  const dischargedPatients = patients.filter(p => !p.is_active);
   
   const currentMonth = new Date();
   const monthStart = startOfMonth(currentMonth);
@@ -26,9 +57,9 @@ const Dashboard: React.FC = () => {
     .reduce((sum, p) => sum + p.amount, 0);
   
   const pendingPayments = patients.filter(p => {
-    const lastPayment = new Date(p.lastPaymentDate);
+    const lastPayment = new Date(p.last_payment_date);
     const thirtyDaysAgo = subDays(new Date(), 30);
-    return p.isActive && isAfter(thirtyDaysAgo, lastPayment);
+    return p.is_active && isAfter(thirtyDaysAgo, lastPayment);
   });
 
   const monthlyTreatments = treatments.filter(t => {
@@ -88,8 +119,16 @@ const Dashboard: React.FC = () => {
   ];
 
   const recentPatients = patients
-    .sort((a, b) => new Date(b.registrationDate).getTime() - new Date(a.registrationDate).getTime())
+    .sort((a, b) => new Date(b.registration_date).getTime() - new Date(a.registration_date).getTime())
     .slice(0, 5);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -149,17 +188,17 @@ const Dashboard: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-900">{patient.name}</p>
                       <p className="text-xs text-gray-500">
-                        Registered: {format(new Date(patient.registrationDate), 'MMM dd, yyyy')}
+                        Registered: {format(new Date(patient.registration_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
                     <div className={`px-2 py-1 text-xs rounded-full ${
-                      patient.paymentStatus === 'paid' 
+                      patient.payment_status === 'paid' 
                         ? 'bg-green-100 text-green-800'
-                        : patient.paymentStatus === 'pending'
+                        : patient.payment_status === 'pending'
                         ? 'bg-yellow-100 text-yellow-800'
                         : 'bg-red-100 text-red-800'
                     }`}>
-                      {patient.paymentStatus}
+                      {patient.payment_status}
                     </div>
                   </div>
                 ))
@@ -183,7 +222,7 @@ const Dashboard: React.FC = () => {
                     <div>
                       <p className="text-sm font-medium text-gray-900">{patient.name}</p>
                       <p className="text-xs text-red-600">
-                        Last payment: {format(new Date(patient.lastPaymentDate), 'MMM dd, yyyy')}
+                        Last payment: {format(new Date(patient.last_payment_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
                     <div className="text-xs font-medium text-red-700">

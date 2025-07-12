@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Patient } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
 import { UserX, Calendar, FileText, Search } from 'lucide-react';
 import { format } from 'date-fns';
 
+type Patient = Database['public']['Tables']['patients']['Row'];
+type PatientUpdate = Database['public']['Tables']['patients']['Update'];
+
 const DischargeManagement: React.FC = () => {
-  const [patients, setPatients] = useLocalStorage<Patient[]>('patients', []);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -15,17 +19,37 @@ const DischargeManagement: React.FC = () => {
     notes: ''
   });
 
-  const activePatients = patients.filter(p => p.isActive);
-  const dischargedPatients = patients.filter(p => !p.isActive);
+  React.useEffect(() => {
+    fetchPatients();
+  }, []);
+
+  const fetchPatients = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPatients(data || []);
+    } catch (error) {
+      console.error('Error fetching patients:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const activePatients = patients.filter(p => p.is_active);
+  const dischargedPatients = patients.filter(p => !p.is_active);
 
   const filteredActivePatients = activePatients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.contactNumber.includes(searchTerm)
+    patient.contact_number.includes(searchTerm)
   );
 
   const filteredDischargedPatients = dischargedPatients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.contactNumber.includes(searchTerm)
+    patient.contact_number.includes(searchTerm)
   );
 
   const handleDischarge = (patient: Patient) => {
@@ -33,42 +57,70 @@ const DischargeManagement: React.FC = () => {
     setShowForm(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     if (!selectedPatient) return;
 
-    setPatients(prev => prev.map(p => 
-      p.id === selectedPatient.id 
-        ? {
-            ...p,
-            isActive: false,
-            dischargeDate: new Date().toISOString(),
-            dischargeReason: formData.dischargeReason
-          }
-        : p
-    ));
+    try {
+      const updateData: PatientUpdate = {
+        is_active: false,
+        discharge_date: new Date().toISOString(),
+        discharge_reason: formData.dischargeReason
+      };
 
-    setFormData({
-      dischargeReason: '',
-      notes: ''
-    });
-    setShowForm(false);
-    setSelectedPatient(null);
+      const { error } = await supabase
+        .from('patients')
+        .update(updateData)
+        .eq('id', selectedPatient.id);
+
+      if (error) throw error;
+
+      await fetchPatients();
+      setFormData({
+        dischargeReason: '',
+        notes: ''
+      });
+      setShowForm(false);
+      setSelectedPatient(null);
+    } catch (error) {
+      console.error('Error discharging patient:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const reactivatePatient = (patientId: string) => {
-    setPatients(prev => prev.map(p => 
-      p.id === patientId 
-        ? {
-            ...p,
-            isActive: true,
-            dischargeDate: undefined,
-            dischargeReason: undefined
-          }
-        : p
-    ));
+  const reactivatePatient = async (patientId: string) => {
+    setLoading(true);
+    try {
+      const updateData: PatientUpdate = {
+        is_active: true,
+        discharge_date: null,
+        discharge_reason: null
+      };
+
+      const { error } = await supabase
+        .from('patients')
+        .update(updateData)
+        .eq('id', patientId);
+
+      if (error) throw error;
+      await fetchPatients();
+    } catch (error) {
+      console.error('Error reactivating patient:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  if (loading && patients.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -106,8 +158,8 @@ const DischargeManagement: React.FC = () => {
               <p className="text-sm font-medium text-gray-600">This Month</p>
               <p className="text-2xl font-bold text-gray-900">
                 {dischargedPatients.filter(p => {
-                  if (!p.dischargeDate) return false;
-                  const dischargeDate = new Date(p.dischargeDate);
+                  if (!p.discharge_date) return false;
+                  const dischargeDate = new Date(p.discharge_date);
                   const now = new Date();
                   return dischargeDate.getMonth() === now.getMonth() &&
                          dischargeDate.getFullYear() === now.getFullYear();
@@ -191,6 +243,7 @@ const DischargeManagement: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={loading}
                   className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
                 >
                   Discharge Patient
@@ -218,24 +271,24 @@ const DischargeManagement: React.FC = () => {
                             Active
                           </span>
                           <span className={`px-2 py-1 text-xs rounded-full ${
-                            patient.paymentStatus === 'paid' 
+                           patient.payment_status === 'paid' 
                               ? 'bg-green-100 text-green-800'
-                              : patient.paymentStatus === 'pending'
+                             : patient.payment_status === 'pending'
                               ? 'bg-yellow-100 text-yellow-800'
                               : 'bg-red-100 text-red-800'
                           }`}>
-                            {patient.paymentStatus}
+                           {patient.payment_status}
                           </span>
                         </div>
                       </div>
                       <p className="text-sm text-gray-600">
-                        Age: {patient.age} | Contact: {patient.contactNumber}
+                       Age: {patient.age} | Contact: {patient.contact_number}
                       </p>
                       <p className="text-sm text-gray-600">
                         Diagnosis: {patient.diagnoses}
                       </p>
                       <p className="text-sm text-gray-500">
-                        Registered: {format(new Date(patient.registrationDate), 'MMM dd, yyyy')}
+                       Registered: {format(new Date(patient.registration_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
                     <button
@@ -276,24 +329,25 @@ const DischargeManagement: React.FC = () => {
                         </div>
                       </div>
                       <p className="text-sm text-gray-600">
-                        Age: {patient.age} | Contact: {patient.contactNumber}
+                        Age: {patient.age} | Contact: {patient.contact_number}
                       </p>
                       <p className="text-sm text-gray-600">
                         Diagnosis: {patient.diagnoses}
                       </p>
                       <div className="mt-2 space-y-1">
                         <p className="text-sm text-gray-500">
-                          Discharged: {patient.dischargeDate ? format(new Date(patient.dischargeDate), 'MMM dd, yyyy') : 'N/A'}
+                          Discharged: {patient.discharge_date ? format(new Date(patient.discharge_date), 'MMM dd, yyyy') : 'N/A'}
                         </p>
-                        {patient.dischargeReason && (
+                        {patient.discharge_reason && (
                           <p className="text-sm text-gray-500">
-                            Reason: {patient.dischargeReason.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            Reason: {patient.discharge_reason.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                           </p>
                         )}
                       </div>
                     </div>
                     <button
                       onClick={() => reactivatePatient(patient.id)}
+                      disabled={loading}
                       className="ml-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm"
                     >
                       Reactivate

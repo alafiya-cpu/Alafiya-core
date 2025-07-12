@@ -1,12 +1,17 @@
 import React, { useState } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Patient, Payment } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
 import { Plus, DollarSign, Calendar, CreditCard, Search } from 'lucide-react';
 import { format } from 'date-fns';
 
+type Patient = Database['public']['Tables']['patients']['Row'];
+type Payment = Database['public']['Tables']['payments']['Row'];
+type PaymentInsert = Database['public']['Tables']['payments']['Insert'];
+
 const PaymentManagement: React.FC = () => {
-  const [patients, setPatients] = useLocalStorage<Patient[]>('patients', []);
-  const [payments, setPayments] = useLocalStorage<Payment[]>('payments', []);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -16,37 +21,70 @@ const PaymentManagement: React.FC = () => {
     method: 'cash' as 'cash' | 'card' | 'insurance'
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [patientsResponse, paymentsResponse] = await Promise.all([
+        supabase.from('patients').select('*').eq('is_active', true),
+        supabase.from('payments').select('*').order('date', { ascending: false })
+      ]);
+
+      if (patientsResponse.error) throw patientsResponse.error;
+      if (paymentsResponse.error) throw paymentsResponse.error;
+
+      setPatients(patientsResponse.data || []);
+      setPayments(paymentsResponse.data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
-    const newPayment: Payment = {
-      id: crypto.randomUUID(),
-      patientId: formData.patientId,
-      amount: parseFloat(formData.amount),
-      date: new Date().toISOString(),
-      method: formData.method,
-      status: 'completed'
-    };
+    try {
+      const insertData: PaymentInsert = {
+        patient_id: formData.patientId,
+        amount: parseFloat(formData.amount),
+        method: formData.method,
+        status: 'completed'
+      };
 
-    setPayments(prev => [...prev, newPayment]);
+      const { error } = await supabase
+        .from('payments')
+        .insert(insertData);
 
-    // Update patient's last payment date and status
-    setPatients(prev => prev.map(p => 
-      p.id === formData.patientId 
-        ? {
-            ...p,
-            lastPaymentDate: new Date().toISOString(),
-            paymentStatus: 'paid'
-          }
-        : p
-    ));
+      if (error) throw error;
 
-    setFormData({
-      patientId: '',
-      amount: '',
-      method: 'cash'
-    });
-    setShowForm(false);
+      // Update patient's last payment date and status
+      const { error: updateError } = await supabase
+        .from('patients')
+        .update({
+          last_payment_date: new Date().toISOString(),
+          payment_status: 'paid'
+        })
+        .eq('id', formData.patientId);
+
+      if (updateError) throw updateError;
+
+      await fetchData();
+      setFormData({
+        patientId: '',
+        amount: '',
+        method: 'cash'
+      });
+      setShowForm(false);
+    } catch (error) {
+      console.error('Error saving payment:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getPatientName = (patientId: string) => {
@@ -56,7 +94,7 @@ const PaymentManagement: React.FC = () => {
 
   const filteredPayments = payments
     .filter(payment => {
-      const patientName = getPatientName(payment.patientId).toLowerCase();
+      const patientName = getPatientName(payment.patient_id).toLowerCase();
       return patientName.includes(searchTerm.toLowerCase());
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -74,6 +112,14 @@ const PaymentManagement: React.FC = () => {
              paymentDate.getFullYear() === now.getFullYear();
     })
     .reduce((sum, p) => sum + p.amount, 0);
+
+  if (loading && payments.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -156,7 +202,7 @@ const PaymentManagement: React.FC = () => {
                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 >
                   <option value="">Select Patient</option>
-                  {patients.filter(p => p.isActive).map(patient => (
+                  {patients.filter(p => p.is_active).map(patient => (
                     <option key={patient.id} value={patient.id}>
                       {patient.name}
                     </option>
@@ -197,6 +243,7 @@ const PaymentManagement: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={loading}
                   className="px-4 py-2 bg-sky-600 text-white rounded-md hover:bg-sky-700"
                 >
                   Record Payment
@@ -220,7 +267,7 @@ const PaymentManagement: React.FC = () => {
                       <div className="flex items-center space-x-4">
                         <div>
                           <p className="text-lg font-medium text-gray-900">
-                            {getPatientName(payment.patientId)}
+                            {getPatientName(payment.patient_id)}
                           </p>
                           <p className="text-sm text-gray-500">
                             {format(new Date(payment.date), 'PPP')} at {format(new Date(payment.date), 'p')}
