@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Type augmentation for ImportMeta to include 'env'
+// Removed unused ImportMetaEnv interface
+
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
+if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Database types
 export interface Database {
