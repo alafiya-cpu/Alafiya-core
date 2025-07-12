@@ -1,37 +1,66 @@
 import React, { useEffect } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
-import { Patient, Notification } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Database } from '../lib/supabase';
 import { Bell, AlertTriangle, CheckCircle, Clock, Calendar } from 'lucide-react';
 import { format, isAfter, subDays, endOfMonth, subMonths } from 'date-fns';
 
+type Patient = Database['public']['Tables']['patients']['Row'];
+type Notification = Database['public']['Tables']['notifications']['Row'];
+type NotificationInsert = Database['public']['Tables']['notifications']['Insert'];
+type NotificationUpdate = Database['public']['Tables']['notifications']['Update'];
+
 const NotificationCenter: React.FC = () => {
-  const [patients] = useLocalStorage<Patient[]>('patients', []);
-  const [notifications, setNotifications] = useLocalStorage<Notification[]>('notifications', []);
+  const [patients, setPatients] = React.useState<Patient[]>([]);
+  const [notifications, setNotifications] = React.useState<Notification[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [patientsResponse, notificationsResponse] = await Promise.all([
+        supabase.from('patients').select('*'),
+        supabase.from('notifications').select('*').order('created_at', { ascending: false })
+      ]);
+
+      if (patientsResponse.error) throw patientsResponse.error;
+      if (notificationsResponse.error) throw notificationsResponse.error;
+
+      setPatients(patientsResponse.data || []);
+      setNotifications(notificationsResponse.data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Generate notifications based on payment status
   useEffect(() => {
-    const generatePaymentNotifications = () => {
+    const generatePaymentNotifications = async () => {
       const today = new Date();
       const lastMonth = endOfMonth(subMonths(today, 1));
       const thirtyDaysAgo = subDays(today, 30);
 
       const overduePatients = patients.filter(patient => {
-        if (!patient.isActive) return false;
+        if (!patient.is_active) return false;
         
-        const lastPayment = new Date(patient.lastPaymentDate);
+        const lastPayment = new Date(patient.last_payment_date);
         return isAfter(thirtyDaysAgo, lastPayment);
       });
 
-      const newNotifications: Notification[] = [];
+      const newNotifications: NotificationInsert[] = [];
 
-      overduePatients.forEach(patient => {
+      for (const patient of overduePatients) {
         const existingNotification = notifications.find(
-          n => n.patientId === patient.id && n.type === 'payment' && !n.isRead
+          n => n.patient_id === patient.id && n.type === 'payment' && !n.is_read
         );
 
         if (!existingNotification) {
           const daysSincePayment = Math.floor(
-            (today.getTime() - new Date(patient.lastPaymentDate).getTime()) / (1000 * 60 * 60 * 24)
+            (today.getTime() - new Date(patient.last_payment_date).getTime()) / (1000 * 60 * 60 * 24)
           );
 
           let priority: 'low' | 'medium' | 'high' = 'low';
@@ -39,37 +68,74 @@ const NotificationCenter: React.FC = () => {
           else if (daysSincePayment > 30) priority = 'medium';
 
           newNotifications.push({
-            id: crypto.randomUUID(),
-            patientId: patient.id,
+            patient_id: patient.id,
             message: `${patient.name} has an overdue payment (${daysSincePayment} days)`,
             type: 'payment',
             priority,
-            isRead: false,
-            createdAt: new Date().toISOString()
+            is_read: false
           });
         }
-      });
+      }
 
       if (newNotifications.length > 0) {
-        setNotifications(prev => [...prev, ...newNotifications]);
+        try {
+          const { error } = await supabase
+            .from('notifications')
+            .insert(newNotifications);
+
+          if (error) throw error;
+          await fetchData();
+        } catch (error) {
+          console.error('Error creating notifications:', error);
+        }
       }
     };
 
-    generatePaymentNotifications();
-  }, [patients, notifications, setNotifications]);
+    if (patients.length > 0) {
+      generatePaymentNotifications();
+    }
+  }, [patients]);
 
-  const markAsRead = (notificationId: string) => {
-    setNotifications(prev => 
-      prev.map(n => n.id === notificationId ? { ...n, isRead: true } : n)
-    );
+  const markAsRead = async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notificationId);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  const markAllAsRead = async () => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('is_read', false);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
   };
 
-  const deleteNotification = (notificationId: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+  const deleteNotification = async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
   };
 
   const getPatientName = (patientId: string) => {
@@ -77,8 +143,16 @@ const NotificationCenter: React.FC = () => {
     return patient?.name || 'Unknown Patient';
   };
 
-  const unreadNotifications = notifications.filter(n => !n.isRead);
-  const readNotifications = notifications.filter(n => n.isRead);
+  const unreadNotifications = notifications.filter(n => !n.is_read);
+  const readNotifications = notifications.filter(n => n.is_read);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+      </div>
+    );
+  }
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
@@ -126,7 +200,7 @@ const NotificationCenter: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-600">High Priority</p>
               <p className="text-lg font-bold text-gray-900">
-                {notifications.filter(n => n.priority === 'high' && !n.isRead).length}
+                {notifications.filter(n => n.priority === 'high' && !n.is_read).length}
               </p>
             </div>
           </div>
@@ -137,7 +211,7 @@ const NotificationCenter: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-600">Medium Priority</p>
               <p className="text-lg font-bold text-gray-900">
-                {notifications.filter(n => n.priority === 'medium' && !n.isRead).length}
+                {notifications.filter(n => n.priority === 'medium' && !n.is_read).length}
               </p>
             </div>
           </div>
@@ -148,7 +222,7 @@ const NotificationCenter: React.FC = () => {
             <div className="ml-3">
               <p className="text-sm font-medium text-gray-600">Low Priority</p>
               <p className="text-lg font-bold text-gray-900">
-                {notifications.filter(n => n.priority === 'low' && !n.isRead).length}
+                {notifications.filter(n => n.priority === 'low' && !n.is_read).length}
               </p>
             </div>
           </div>
@@ -190,7 +264,7 @@ const NotificationCenter: React.FC = () => {
                             {notification.message}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
-                            {format(new Date(notification.createdAt), 'PPp')}
+                            {format(new Date(notification.created_at), 'PPp')}
                           </p>
                         </div>
                       </div>
@@ -225,7 +299,7 @@ const NotificationCenter: React.FC = () => {
             </h3>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {readNotifications
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                 .map((notification) => (
                   <div
                     key={notification.id}
@@ -239,7 +313,7 @@ const NotificationCenter: React.FC = () => {
                             {notification.message}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
-                            {format(new Date(notification.createdAt), 'PPp')}
+                            {format(new Date(notification.created_at), 'PPp')}
                           </p>
                         </div>
                       </div>
