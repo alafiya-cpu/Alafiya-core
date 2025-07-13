@@ -92,19 +92,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .limit(1);
 
       if (error) {
-        // Handle case where no user profile is found
-        if (error.code === 'PGRST116') {
-          console.log('No user profile found for user:', userId);
-          setUser(null);
-          return null;
-        }
         throw error;
       }
-      setUser(data);
-      return data;
+      
+      // Check if any user profile was found
+      if (!data || data.length === 0) {
+        console.log('No user profile found for user:', userId);
+        setUser(null);
+        return null;
+      }
+      
+      setUser(data[0]);
+      return data[0];
     } catch (error) {
       console.error('Error fetching user profile:', error);
       setUser(null);
