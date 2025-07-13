@@ -1,5 +1,4 @@
 import React from 'react';
-import { supabase } from '../utils/supabase'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -12,7 +11,6 @@ import TreatmentTracking from './components/TreatmentTracking';
 import PaymentManagement from './components/PaymentManagement';
 import NotificationCenter from './components/NotificationCenter';
 import DischargeManagement from './components/DischargeManagement';
-
 
 function App() {
   return (
