@@ -152,20 +152,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) throw error;
 
       if (data.user) {
-        // Create user profile in our users table
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email,
-            name,
-            role: 'staff'
-          });
+        // Wait a moment for the auth session to be established
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        try {
+          // Create user profile in our users table
+          const { error: profileError } = await supabase
+            .from('users')
+            .insert({
+              id: data.user.id,
+              email,
+              name,
+              role: 'staff'
+            });
 
-        if (profileError) throw profileError;
+          if (profileError) {
+            console.error('Profile creation error:', profileError);
+            throw profileError;
+          }
 
-        const profile = await fetchUserProfile(data.user.id);
-        return profile !== null;
+          const profile = await fetchUserProfile(data.user.id);
+          return profile !== null;
+        } catch (profileError) {
+          console.error('Error creating user profile:', profileError);
+          // If profile creation fails, clean up the auth user
+          await supabase.auth.signOut();
+          return false;
+        }
       }
       return false;
     } catch (error) {
