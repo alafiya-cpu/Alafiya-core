@@ -22,9 +22,7 @@ const LoginForm: React.FC = () => {
     } else {
       setError('Invalid email or password');
     }
-    logout().then(() => {
-      navigate('/login');
-    });
+    setIsLoading(false);
   };
 
   return (

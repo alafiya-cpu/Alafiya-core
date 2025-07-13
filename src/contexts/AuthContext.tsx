@@ -66,10 +66,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', userId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Handle case where no user profile is found
+        if (error.code === 'PGRST116') {
+          console.log('No user profile found for user:', userId);
+          setUser(null);
+          return null;
+        }
+        throw error;
+      }
       setUser(data);
+      return data;
     } catch (error) {
       console.error('Error fetching user profile:', error);
+      setUser(null);
+      return null;
     }
   };
 
@@ -83,8 +94,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) throw error;
       
       if (data.user) {
-        await fetchUserProfile(data.user.id);
-        return true;
+        const profile = await fetchUserProfile(data.user.id);
+        return profile !== null;
       }
       return false;
     } catch (error) {
@@ -125,8 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (profileError) throw profileError;
 
-        await fetchUserProfile(data.user.id);
-        return true;
+        const profile = await fetchUserProfile(data.user.id);
+        return profile !== null;
       }
       return false;
     } catch (error) {
