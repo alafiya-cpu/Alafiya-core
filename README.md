@@ -67,7 +67,7 @@ Al-Afiya is an all-in-one platform that digitizes the workflow of rehabilitation
 - **Database provided by:** [Supabase](https://supabase.com/) – Free, scalable Postgres database and authentication.
 - **Repository management:** [GitHub](https://github.com/) & GitHub Copilot – Seamless code collaboration and AI-powered coding.
 - **Hosting:** [Netlify](https://app.netlify.com/) – Fast, reliable, and free web hosting.
-- **Project Lead:** Engineer Ismail Mohamed – Integrated all these free services, deployed, and published the app for public benefit.
+- **Project Lead:** Engineer Ismail Mohamed – Integrated all these free services, deployed, and published the app for public benefit. @bitbirr @macaanto14
 
 ---
 
