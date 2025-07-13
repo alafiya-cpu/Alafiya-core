@@ -39,7 +39,7 @@ Al-Afiya is an all-in-one platform that digitizes the workflow of rehabilitation
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/your-username/Alafiya-core.git
+   git clone https://github.com/alafiya-cpu/Alafiya-core.git
    cd Alafiya-core
    ```
 
