@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/supabase';
-import { Plus, Search, Edit2, Eye, Filter } from 'lucide-react';
+import { Plus, Search, Edit2, Filter } from 'lucide-react';
 import { format } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 type Patient = Database['public']['Tables']['patients']['Row'];
 type PatientInsert = Database['public']['Tables']['patients']['Insert'];
 type PatientUpdate = Database['public']['Tables']['patients']['Update'];
 
 const PatientManagement: React.FC = () => {
+  const { user, isAuthenticated, isDemoMode } = useAuth();
+  const navigate = useNavigate();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,22 +31,44 @@ const PatientManagement: React.FC = () => {
     paymentStatus: 'pending' as 'paid' | 'pending' | 'overdue'
   });
 
-  // Fetch patients on component mount
+  // Check authentication and fetch patients on component mount
   React.useEffect(() => {
+    if (!isAuthenticated || !user) {
+      navigate('/login');
+      return;
+    }
     fetchPatients();
-  }, []);
+  }, [isAuthenticated, user, navigate]);
 
   const fetchPatients = async () => {
     try {
-      const { data, error } = await supabase
-        .from('patients')
-        .select('*')
-        .order('created_at', { ascending: false });
+      setError(null);
+      
+      if (isDemoMode) {
+        // In demo mode, use local state or mock data
+        console.log('Demo mode: using local patient data');
+        // For demo purposes, we'll show an empty list or some sample data
+        setPatients([]);
+      } else {
+        const { data, error } = await supabase
+          .from('patients')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setPatients(data || []);
-    } catch (error) {
+        if (error) {
+          if (error.code === 'PGRST301' || error.message.includes('401') || error.message.includes('unauthorized')) {
+            setError('Authentication required. Please log in again.');
+            navigate('/login');
+            return;
+          }
+          throw error;
+        }
+        setPatients(data || []);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch patients';
       console.error('Error fetching patients:', error);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -58,9 +85,28 @@ const PatientManagement: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isAuthenticated || !user) {
+      setError('Please log in to register patients.');
+      navigate('/login');
+      return;
+    }
+    
     setLoading(true);
+    setError(null);
     
     try {
+      if (isDemoMode) {
+        // In demo mode, simulate successful operation
+        console.log('Demo mode: simulating patient save');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
+        
+        // Show success message for demo
+        alert(`Demo: Patient "${formData.name}" would be saved successfully!`);
+        resetForm();
+        return;
+      }
+      
       if (editingPatient) {
         const updateData: PatientUpdate = {
           name: formData.name,
@@ -77,7 +123,14 @@ const PatientManagement: React.FC = () => {
           .update(updateData)
           .eq('id', editingPatient.id);
 
-        if (error) throw error;
+        if (error) {
+          if (error.code === 'PGRST301' || error.message.includes('401') || error.message.includes('unauthorized')) {
+            setError('Authentication expired. Please log in again.');
+            navigate('/login');
+            return;
+          }
+          throw error;
+        }
       } else {
         const insertData: PatientInsert = {
           name: formData.name,
@@ -94,13 +147,22 @@ const PatientManagement: React.FC = () => {
           .from('patients')
           .insert(insertData);
 
-        if (error) throw error;
+        if (error) {
+          if (error.code === 'PGRST301' || error.message.includes('401') || error.message.includes('unauthorized')) {
+            setError('Authentication expired. Please log in again.');
+            navigate('/login');
+            return;
+          }
+          throw error;
+        }
       }
 
       await fetchPatients();
       resetForm();
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save patient';
       console.error('Error saving patient:', error);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -134,6 +196,22 @@ const PatientManagement: React.FC = () => {
     setShowForm(true);
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <div className="text-center">
+          <p className="text-gray-600">Please log in to access patient management.</p>
+          <button
+            onClick={() => navigate('/login')}
+            className="mt-4 bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-md"
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading && patients.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-64">
@@ -146,14 +224,45 @@ const PatientManagement: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-900">Patient Management</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-md flex items-center space-x-2"
-        >
-          <Plus className="h-5 w-5" />
-          <span>Add Patient</span>
-        </button>
+        <div className="flex items-center space-x-4">
+          {user && (
+            <span className="text-sm text-gray-600">
+              Logged in as: {user.name} ({user.role})
+              {isDemoMode && <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">DEMO</span>}
+            </span>
+          )}
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-md flex items-center space-x-2"
+            disabled={!isAuthenticated}
+          >
+            <Plus className="h-5 w-5" />
+            <span>Add Patient</span>
+          </button>
+        </div>
       </div>
+
+      {/* Demo Mode Notice */}
+      {isDemoMode && (
+        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
+          <strong>Demo Mode:</strong> Patient operations are simulated. Data is not persisted to the database.
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+          <span className="block sm:inline">{error}</span>
+          {error.includes('Authentication') && (
+            <button
+              onClick={() => navigate('/login')}
+              className="absolute top-0 bottom-0 right-0 px-4 py-3 text-red-500 hover:text-red-700"
+            >
+              Login
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Search and Filter */}
       <div className="bg-white p-4 rounded-lg shadow space-y-4 sm:space-y-0 sm:flex sm:items-center sm:space-x-4">
@@ -173,7 +282,7 @@ const PatientManagement: React.FC = () => {
           <Filter className="h-5 w-5 text-gray-400" />
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as any)}
+            onChange={(e) => setFilterStatus(e.target.value as FilterStatus)}
             className="border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
           >
             <option value="all">All Patients</option>
@@ -266,7 +375,7 @@ const PatientManagement: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700">Payment Status</label>
                 <select
                   value={formData.paymentStatus}
-                  onChange={(e) => setFormData(prev => ({...prev, paymentStatus: e.target.value as any}))}
+                  onChange={(e) => setFormData(prev => ({...prev, paymentStatus: e.target.value as PaymentStatus}))}
                   className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 >
                   <option value="pending">Pending</option>
@@ -314,7 +423,7 @@ const PatientManagement: React.FC = () => {
                           {patient.is_active ? 'Active' : 'Discharged'}
                         </span>
                         <span className={`px-2 py-1 text-xs rounded-full ${
-                          patient.payment_status === 'paid' 
+                          patient.payment_status === 'paid'
                             ? 'bg-green-100 text-green-800'
                             : patient.payment_status === 'pending'
                             ? 'bg-yellow-100 text-yellow-800'
@@ -332,7 +441,7 @@ const PatientManagement: React.FC = () => {
                         <strong>Treatment:</strong> {patient.treatment}
                       </p>
                       <p className="text-sm text-gray-500 mt-1">
-                        Registered: {format(new Date(patient.registration_date), 'MMM dd, yyyy')} | 
+                        Registered: {format(new Date(patient.registration_date), 'MMM dd, yyyy')} |
                         Last Payment: {format(new Date(patient.last_payment_date), 'MMM dd, yyyy')}
                       </p>
                     </div>
@@ -341,6 +450,7 @@ const PatientManagement: React.FC = () => {
                     <button
                       onClick={() => handleEdit(patient)}
                       className="p-2 text-gray-400 hover:text-sky-600"
+                      title="Edit Patient"
                     >
                       <Edit2 className="h-5 w-5" />
                     </button>
@@ -350,7 +460,7 @@ const PatientManagement: React.FC = () => {
             ))
           ) : (
             <li className="px-6 py-8 text-center text-gray-500">
-              No patients found
+              {isDemoMode ? 'Demo mode: No patients to display' : 'No patients found'}
             </li>
           )}
         </ul>
