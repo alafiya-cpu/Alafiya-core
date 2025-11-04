@@ -1,0 +1,352 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/providers/auth_provider_notifier.dart';
+import '../../../shared/widgets/app_router.dart';
+
+/// Enhanced Splash Screen Widget
+/// Shows company logo with improved design and smooth animations
+class SplashScreen extends ConsumerStatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends ConsumerState<SplashScreen>
+    with TickerProviderStateMixin {
+  late AnimationController _fadeController;
+  late AnimationController _scaleController;
+  late AnimationController _logoController;
+  
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAnimations();
+    _navigateToNextScreen();
+  }
+
+  void _initializeAnimations() {
+    // Fade animation controller
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    );
+
+    // Scale animation controller
+    _scaleController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
+    // Logo animation controller
+    _logoController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+
+    // Fade animation
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeIn,
+    ));
+
+    // Scale animation
+    _scaleAnimation = Tween<double>(
+      begin: 0.3,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _scaleController,
+      curve: Curves.elasticOut,
+    ));
+
+    // Slide animation
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    // Start animations
+    _fadeController.forward();
+    _scaleController.forward();
+    _logoController.forward();
+  }
+
+  /// Navigate to the appropriate screen based on authentication status
+  Future<void> _navigateToNextScreen() async {
+    // Wait for minimum splash screen duration
+    await Future.delayed(const Duration(seconds: 3));
+    
+    if (!mounted) return;
+    
+    // Wait for authentication to finish loading
+    final authProviderInstance = ref.read(authProvider.notifier);
+    
+    // Wait while auth is still loading
+    while (authProviderInstance.isLoading && mounted) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    
+    if (!mounted) return;
+    
+    // Check authentication status and navigate
+    final authState = ref.read(authProvider);
+    final isAuthenticated = authState.isAuthenticated;
+    
+    if (isAuthenticated) {
+      // User is authenticated, go to dashboard
+      NavigationHelper.goToDashboard(context);
+    } else {
+      // User is not authenticated, go to login
+      NavigationHelper.goToLogin(context);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    _scaleController.dispose();
+    _logoController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final isTablet = AppTheme.isTablet(context);
+    
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppTheme.primaryColor.withOpacity(0.95),
+              AppTheme.primaryColorDark.withOpacity(0.98),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Main Content Container
+              Expanded(
+                child: Center(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: ScaleTransition(
+                      scale: _scaleAnimation,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Company Logo with Enhanced Animation
+                          SlideTransition(
+                            position: _slideAnimation,
+                            child: Container(
+                              width: isTablet ? 200 : 150,
+                              height: isTablet ? 200 : 150,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: AppTheme.getFloatingActionButtonShadow(
+                                  Colors.white.withOpacity(0.3),
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: Stack(
+                                  children: [
+                                    // Company Logo Image
+                                    Positioned.fill(
+                                      child: Image.asset(
+                                        'assets/images/logo.png',
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Container(
+                                            padding: const EdgeInsets.all(
+                                              AppTheme.spacingM,
+                                            ),
+                                            child: Image.asset(
+                                              'assets/images/splash_screen.png',
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (context, error, stackTrace) {
+                                                return const Icon(
+                                                  Icons.medical_services,
+                                                  size: 80,
+                                                  color: AppTheme.primaryColor,
+                                                );
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    
+                                    // Loading overlay for logo
+                                    Positioned.fill(
+                                      child: AnimatedBuilder(
+                                        animation: _logoController,
+                                        builder: (context, child) {
+                                          return Container(
+                                            color: AppTheme.primaryColor.withOpacity(
+                                              0.1 * (1 - _logoController.value),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          SizedBox(height: AppTheme.spacingXXL),
+                          
+                          // App Name with Enhanced Typography
+                          SlideTransition(
+                            position: _slideAnimation,
+                            child: Text(
+                              'Al-Afiya',
+                              style: GoogleFonts.inter(
+                                fontSize: isTablet ? 48 : 36,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: -0.02,
+                                height: 1.1,
+                              ),
+                            ),
+                          ),
+                          
+                          SizedBox(height: AppTheme.spacingS),
+                          
+                          // App Subtitle with Improved Styling
+                          SlideTransition(
+                            position: _slideAnimation,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppTheme.spacingL,
+                              ),
+                              child: Text(
+                                'Healing with Compassion and Dignity.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: isTablet ? 20 : 16,
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontWeight: FontWeight.w300,
+                                  height: 1.4,
+                                  letterSpacing: 0.02,
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          SizedBox(height: AppTheme.spacingXXXL),
+                          
+                          // Enhanced Loading Indicator
+                          SlideTransition(
+                            position: _slideAnimation,
+                            child: Column(
+                              children: [
+                                // Custom loading indicator
+                                SizedBox(
+                                  width: isTablet ? 60 : 40,
+                                  height: isTablet ? 60 : 40,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white.withOpacity(0.8),
+                                    ),
+                                    backgroundColor: Colors.white.withOpacity(0.2),
+                                  ),
+                                ),
+                                
+                                SizedBox(height: AppTheme.spacingM),
+                                
+                                // Loading text with animation
+                                AnimatedBuilder(
+                                  animation: _fadeController,
+                                  builder: (context, child) {
+                                    return Opacity(
+                                      opacity: _fadeAnimation.value * 0.8,
+                                      child: Text(
+                                        'Initializing Rehabilitation Services...',
+                                        style: GoogleFonts.inter(
+                                          fontSize: isTablet ? 16 : 14,
+                                          color: Colors.white.withOpacity(0.7),
+                                          fontWeight: FontWeight.w400,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Footer with version and company info
+              FadeTransition(
+                opacity: _fadeAnimation,
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    bottom: AppTheme.spacingXL,
+                    left: AppTheme.spacingL,
+                    right: AppTheme.spacingL,
+                  ),
+                  child: Column(
+                    children: [
+                      // Company tagline
+                      Text(
+                        'Excellence in Providing specialized treatment programs',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.white.withOpacity(0.6),
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                      
+                      SizedBox(height: AppTheme.spacingS),
+                      
+                      // Version info
+                      Text(
+                        'Version 1.0.0',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: Colors.white.withOpacity(0.5),
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
